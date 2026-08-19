@@ -1,0 +1,299 @@
+# 💬 Socket-based Chat Application — সম্পূর্ণ গাইড
+
+## 📋 প্রোজেক্ট কী?
+এটি একটি **real-time chat application** যেখানে的多 users একসাথে message পাঠাতে পারে, typing indicator দেখতে পারে, online/offline status দেখতে পারে এবং notifications পাবে। এটি ২টা অংশে ভাগ করা আছে:
+
+---
+
+## 🏗️ আর্কিটেকচার (Overall Structure)
+
+```
+Socket_template/
+├── chat_backend/          ← NestJS (Server)
+│   ├── src/
+│   │   ├── auth/          ← Login/Register/Token管理
+│   │   ├── messaging/     ← Socket.IO + REST API
+│   │   └── prisma/        ← Database connection
+│   └── prisma/
+│       └── schema.prisma  ← Database表格设计
+│
+└── chat-template-monorepo/ ← Next.js (Client)
+    ├── app/               ←页面
+    ├── components/chat/   ← Chat UI কম্পোনেন্ট
+    ├── hooks/             ← Socket connection管理
+    ├── lib/               ← Socketサービス + Utility
+    ├── redux/             ← State管理 (RTK Query)
+    └── types/             ← TypeScript types
+```
+
+---
+
+## 🔄 পুরো প্রসেস কীভাবে কাজ করে? (Step by Step)
+
+### 1️⃣ **User Login/Register**
+```
+Client → POST /auth/login → Server validates → Returns JWT Token
+Client stores token in localStorage
+```
+
+**Files involved:**
+- `auth.controller.ts` → Login/Register endpoints Accept করে
+- `auth.service.ts` → Password hash করে, token generate করে
+- `jwt.strategy.ts` → সব API request এ token verify করে
+
+---
+
+### 2️⃣ **Socket Connection Establish**
+```
+Client opens WebSocket → Server verifies JWT → Connection accepted
+Server tracks: userId → socketId mapping
+```
+
+**Server side (`messaging.gateway.ts`):**
+```typescript
+handleConnection() {
+  1. Token from request headers/auth
+  2. Verify token with JWTService
+  3. Extract userId from token
+  4. Save: connectedUsers[userId].add(socketId)
+  5. Join room: user:${userId}
+  6. Broadcast: USER_STATUS → online
+}
+```
+
+**Client side (`useChatSocket.ts`):**
+```typescript
+useEffect(() => {
+  token = localStorage.getItem('token');
+  socket = SocketService.getInstance({ url, token });
+  socket.connect();
+
+  // Listen to events
+  socket.on('newMessage', handleMessage);
+  socket.on('typing', handleTyping);
+  socket.on('messageRead', handleRead);
+  socket.on('userStatus', handleStatus);
+});
+```
+
+---
+
+### 3️⃣ **Message Sending Flow**
+```
+User types message → Click send
+    ↓
+ChatProvider.sendMessage()
+    ↓
+REST API: POST /chat/messages (sendMessageApi)
+    ↓
+Server: messaging.controller.ts
+    ↓
+Prisma: Create message in DB + Update conversation timestamp
+    ↓
+Socket: broadcastToConversation('newMessage', message)
+    ↓
+All connected clients in that conversation receive the message
+    ↓
+useChatSocket updates Redux cache + UI automatically
+```
+
+**Backend (`messaging.controller.ts`):**
+```typescript
+@Post('messages')
+async sendMessage(@User() user, @Body() dto) {
+  1. Check if user is participant
+  2. Create message in database
+  3. Broadcast to conversation room
+  4. Create notifications for other participants
+  5. Return message to sender
+}
+```
+
+**Frontend (`useChatSocket.ts`):**
+```typescript
+socket.on('newMessage', (message) => {
+  1. Check if message is from me or others
+  2. Update RTK Query cache for that conversation
+  3. Update conversations list (lastMessage + sort)
+  4. If from others: increment unread + show notification
+  5. UI automatically re-renders with new message
+});
+```
+
+---
+
+### 4️⃣ **Real-time Features**
+
+#### **a) Typing Indicator**
+```
+User starts typing → emit('typing', { conversationId, isTyping: true })
+    ↓
+Server broadcasts to room EXCEPT sender
+    ↓
+Other users see "User is typing..."
+```
+
+#### **b) Online/Offline Status**
+```
+User connects → broadcastUserOnlineStatus(userId, true)
+User disconnects → broadcastUserOnlineStatus(userId, false)
+    ↓
+All conversations see: "Online" / "Offline" badge
+```
+
+#### **c) Message Read Receipt**
+```
+User opens chat → emit('markRead', { messageId, conversationId })
+    ↓
+Server updates status in DB → broadcasts to room
+    ↓
+Sender sees: "Read" ✓✓
+```
+
+---
+
+## 🗄️ Database Schema (prisma/schema.prisma)
+
+```prisma
+User
+  ├── id, email, name, password, avatar
+  ├── sentMessages
+  ├── receivedMessages
+  ├── notifications
+  └── conversations (through ConversationParticipant)
+
+Conversation
+  ├── id, createdAt, updatedAt
+  ├── participants (through ConversationParticipant)
+  └── messages
+
+ConversationParticipant
+  ├── conversationId + userId (UNIQUE)
+  └── links Users ↔ Conversations
+
+Message
+  ├── id, content, type (TEXT/IMAGE/FILE/SYSTEM)
+  ├── status (SENT/DELIVERED/READ/FAILED)
+  ├── senderId → User
+  ├── receiverId → User (optional, for 1-on-1)
+  ├── conversationId → Conversation
+  └── createdAt, updatedAt
+
+Notification
+  ├── userId
+  ├── title, message
+  ├── type (MESSAGE/FRIEND_REQUEST/SYSTEM/MENTION)
+  ├── read: false
+  └── data: Json
+```
+
+---
+
+## 🎨 Frontend State Management (Redux + RTK Query)
+
+```typescript
+Redux Store:
+  chat: {
+    activeConversationId: string | null,
+    typingUsers: { [conversationId]: userId[] },
+    unreadCount: number,
+    unreadConversations: { [conversationId]: count },
+    notifications: Notification[]
+  }
+
+RTK Query Cache:
+  getConversations → Array of conversations
+  getMessages → Array of messages for a conversation
+```
+
+---
+
+## 🔧 এটা কীভাবে কাজ করে? (Example: Message য Héllo Bosnia)
+
+**Step 1:** বিজয় messaging 컴포নেন্ট খুলে
+
+**Step 2:** সকেট কানেকশন
+- `useChatSocket()` localStorage থেকে token ন代人
+- `SocketService` creates singleton instance
+- Connects to `http://localhost:5000/chat`
+
+**Step 3:** কনভার্সেশন সিলেক্ট
+- ব Geonames দেয় → `setActiveConversation(id)`
+- Frontend: `joinRoom(conversationId)` emits to server
+- Server: `client.join('conversation:123')`
+
+**Step 4:** মেসেজ পাঠানো
+- বিজয় types: "Hi Bosnia" → Enter
+- `ChatProvider.sendMessage("Hi Bosnia")`
+  - API call: `POST /chat/messages` with `{ conversationId, content, receiverId }`
+  - Frontend immediately optimistically updates UI
+  - Server creates message in DB
+  - Server broadcasts: `io.to('conversation:123').emit('newMessage', message)`
+
+**Step 5:** রহিম রিসিভ করে
+- `useChatSocket` listens to `newMessage`
+- Updates Redux cache:
+  - Adds message to `getMessages` cache
+  - Updates `lastMessage` in `getConversations` cache
+- If not active conversation: `incrementUnread`
+- Creates notification: "New Message from Vijay"
+- UI automatically shows new message
+
+**Step 6:** রহিম রিপ্লাই করে
+- Same flow repeats
+- বিজয়'s screen immediately shows reply (real-time!)
+
+---
+
+## 🛠️ Recent Fixes (What I Fixed)
+
+### Backend Fixes:
+1. **Prisma** — `updatedAt` conflict solved (removed duplicate default)
+2. **JWT** — Type cast issue fixed for token expiration
+3. **Gateway** —
+   - Null check added to prevent crash on disconnect
+   - Sender no longer receives their own typing/read receipts (uses `client.to()` instead of `server.to()`)
+4. **Message Service** — Removed unnecessary database transaction (simpler, faster)
+5. **Controller** — Removed duplicate database query in markAsRead
+
+### Frontend Fixes:
+6. **Next.js Config** — Added API proxy so `/api/*` forwards to backend
+7. **Type Safety** — Fixed `SocketEmitEvents` types to match backend exactly
+8. **ChatProvider** — No more empty string `receiverId` sent to backend
+9. **Group Chat** — Properly shows all participant names in header for group chats
+10. **Socket Reconnection** — Auto-reconnects if token changes (login/logout)
+11. **Fallbacks** — Won't crash if userId is temporarily unavailable
+
+---
+
+## 🚀 How to Run?
+
+**Backend:**
+```bash
+cd chat_backend
+npm install
+# Create .env with DATABASE_URL
+npm run start:dev
+# Runs on http://localhost:5000
+```
+
+**Frontend:**
+```bash
+cd chat-template-monorepo
+npm install
+npm run dev
+# Runs on http://localhost:3000
+```
+
+---
+
+## 🎯 Key Takeaways
+
+1. **Real-time = WebSockets**: Socket.IO handles instant messaging
+2. **REST for history**: HTTP API fetches old messages
+3. **Redux for state**: Keeps UI in sync with server
+4. **JWT for auth**: No sessions, token-based authentication
+5. **Optimistic updates**: UI updates immediately, syncs in background
+6. **Notifications**: Both in-app AND push-ready
+
+এই architecture খুব scalable — নতুন features যোগ করা সহজ (e.g., file sharing, voice messages, group calls).

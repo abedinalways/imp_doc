@@ -1,0 +1,245 @@
+# 📊 AMRounds Frontend - সম্পূর্ণ কোড রিভিউ রিপোর্ট (বাংলায়)
+
+## 🏗️ প্রজেক্ট ওভারভিউ
+
+এটি একটি **Next.js 14+ (App Router)** ভিত্তিক মেডিকেল পরীক্ষার প্ল্যাটফর্ম। TypeScript, Tailwind CSS, Redux Toolkit (RTK Query), Socket.IO ব্যবহার করা হয়েছে। ইউজার ও অ্যাডমিন ড্যাশবোর্ড, চ্যাট সিস্টেম, রিয়েল-টাইম নোটিফিকেশন, টেস্ট ম্যানেজমেন্ট ইত্যাদি ফিচার আছে।
+
+---
+
+## ১️⃣ Redux (RTK Query) ইমপ্লিমেন্টেশন - কেমন হয়েছে?
+
+### ✅ **যা ভালো হয়েছে:**
+
+**১. সেন্ট্রালাইজড baseApi:**
+```typescript
+// src/app/redux/api/baseApi.ts
+export const baseApi = createApi({
+  reducerPath: 'api',
+  baseQuery: fetchBaseQuery({
+    baseUrl: process.env.NEXT_PUBLIC_API_ENDPOINT,
+    prepareHeaders: (headers, { getState }) => {
+      const token = (getState() as { auth: AuthState }).auth.auth.token;
+      if (token) headers.set('authorization', `Bearer ${token}`);
+      return headers;
+    },
+  }),
+  tagTypes: [...],
+  endpoints: () => ({}),
+});
+```
+- সব API এক জায়গা থেকে baseUrl ও auth token পায়
+- `tagTypes` ব্যবহার করে cache invalidation করা হয়
+
+**২. ফিচার-ভিত্তিক API সেগমেন্টেশন:**
+- `authApi.ts`, `chatApi.ts`, `testSessionApi.ts`, `notificationApi.ts`, `leaderboardApi.ts` ইত্যাদি আলাদা ফাইল
+- প্রতিটি API নিজস্ব endpoint ও types সহ সংগঠিত
+
+**৩. Auth Token ম্যানেজমেন্ট:**
+- `authSlice.ts` এ token cookie তে store হয়
+- `AuthProvider.tsx` এ cookie থেকে token restore করে `useMeQuery` দিয়ে user data fetch হয়
+- `baseApi` এর `prepareHeaders` দিয়ে প্রতিটি request এ token পাঠানো হয়
+
+**৪. Optimistic Updates (চ্যাটে):**
+```typescript
+// ChatContext.tsx
+const tempId = `temp_${crypto.randomUUID()}`;
+// temp message cache এ add হয়, তারপর API success হলে replace হয়
+```
+- মেসেজ পাঠানোর সময় UI তে সাথে সাথে দেখায়, API response এ replace হয়
+
+**৫. Cache Invalidation সঠিকভাবে:**
+```typescript
+invalidatesTags: (_result, _error, body) => [
+  { type: 'Test', id: body.test_id },
+  { type: 'IncompleteTests', id: 'LIST' },
+  'QuestionCount',
+],
+```
+- টেস্টের উত্তর দিলে শুধু সেই টেস্টের cache invalidate হয়
+
+**৬. Redux Persist (SSR-safe):**
+- `reduxStorage.ts` এ SSR-safe storage তৈরি করা হয়েছে
+- `whitelist: []` - শুধু session-only state রাখা হয়েছে (server authoritative state)
+
+### ⚠️ **যে সমস্যাগুলো আছে:**
+
+**১. store.ts এ প্রচুর commented-out কোড:**
+```typescript
+// import { configureStore } from '@reduxjs/toolkit';
+// import authReducer from './authSlice';
+// ... 70+ লাইন commented
+```
+- 70+ লাইনের commented-out কোড file এ পড়ে আছে - এটা clean না
+
+**২. Duplicate Endpoints:**
+- `answerQuestion` এবং `getTestResult` **দুই জায়গায়** define করা হয়েছে:
+  - `testSessionApi.ts` এ
+  - `startTestApi.ts` এ
+- `overrideExisting: true` ব্যবহার করে একটার উপর অন্যটা override হয় - এটা confusion তৈরি করে
+
+**৩. `any` type ব্যবহার:**
+```typescript
+// NotificationSlice.ts
+type: (item.notification_event?.type as any) || 'conversation',
+```
+- `any` type ব্যবহার করা উচিত না
+
+**৪. Console.log production এ:**
+```typescript
+// authSlice.ts
+console.log('Setting auth:', state.auth);
+// ChatContext.tsx
+console.log('Chat Context User:', currentUser);
+// useChatSocket.ts
+console.log('[Chat] New message/notification received:', payload);
+```
+- Production এ console.log থাকা উচিত না
+
+**৫. IncompleteTestApi.ts এ commented-out কোড:**
+- 50+ লাইনের commented-out পুরনো কোড file এ আছে
+
+---
+
+## ২️⃣ Socket.IO ইমপ্লিমেন্টেশন - কেমন হয়েছে?
+
+### ✅ **যা ভালো হয়েছে:**
+
+**১. Singleton Socket Manager (`src/lib/socket.ts`):**
+```typescript
+let socket: Socket | null = null;
+let currentToken: string | null = null;
+const activeRooms = new Set<string>();
+const pendingRooms = new Set<string>();
+```
+- একটাই socket instance থাকে (singleton pattern)
+- Token change হলে পুরনো socket cleanup হয়
+
+**২. Room Management:**
+- `joinRoom()`, `joinRooms()`, `leaveRoom()` - সব ফাংশন আছে
+- `activeRooms` Set দিয়ে duplicate join prevent হয়
+- Socket disconnected থাকলে `pendingRooms` queue তে রাখা হয়, connect হলে auto-join হয়
+
+**৩. Reconnection Logic:**
+```typescript
+// Server-initiated disconnect এ exponential backoff
+const delay = Math.min(2000 * Math.pow(2, reconnectAttempts - 1), 30000);
+```
+- `io server disconnect` হলে manual reconnect হয় exponential backoff দিয়ে
+- Max 10 attempts পর্যন্ত
+
+**৪. Auth Token Socket এ পাঠানো:**
+- `auth`, `query`, `extraHeaders` - তিন জায়গায় token পাঠানো হয় (backend flexibility এর জন্য)
+
+**৫. useChatSocket Hook:**
+- Token থাকলে socket connect হয়, না থাকলে disconnect
+- Message event গুলো listen করে Redux cache update হয়
+- Conversation auto-join হয়
+- Notification trigger হয়
+
+**৬. Multiple Event Aliases:**
+```typescript
+const MESSAGE_EVENTS = [
+  'message', 'newMessage', 'new_message', 'receiveMessage',
+  'receive_message', 'chatMessage', 'chat_message',
+  'notification', 'newNotification', 'new_notification',
+];
+```
+- Backend এর event naming variation handle করার জন্য
+
+### ⚠️ **যে সমস্যাগুলো আছে:**
+
+**১. transports: ['polling'] শুধু:**
+```typescript
+transports: ['polling'],
+```
+- শুধু polling ব্যবহার করা হচ্ছে, WebSocket transport ব্যবহার করা হচ্ছে না!
+- এটা performance issue - real-time হওয়া উচিত WebSocket
+
+**২. Socket URL Fallback Chain:**
+```typescript
+const rawUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_ENDPOINT || '';
+```
+- Socket URL আলাদা না থাকলে API URL ব্যবহার হচ্ছে - এটা socket server আলাদা হলে কাজ করবে না
+
+**৩. useNotificationSocket.ts deprecated কিন্তু file আছে:**
+- পুরনো file no-op হিসেবে রাখা হয়েছে - delete করা উচিত
+
+**৪. Socket Event Payload Parsing জটিল:**
+```typescript
+// useChatSocket.ts - extractMessageData
+const msg = (data?.data as SocketPayload) || data;
+const sender = (msg?.sender as SocketPayload) || (data?.sender as SocketPayload) || {};
+```
+- Payload structure নিয়ে অনেক assumption - backend change হলে ভেঙে যাবে
+
+**৫. Console.log অনেক বেশি:**
+- `[Socket] Connecting to:`, `[Chat] New message received:`, `[Chat] Joining new conversations:` ইত্যাদি
+
+---
+
+## ৩️⃣ কোড কোয়ালিটি ও মেইনটেইনেবিলিটি অ্যাসেসমেন্ট
+
+### ✅ **ভালো দিক:**
+
+| দিক | রেটিং | মন্তব্য |
+|------|-------|---------|
+| **ফোল্ডার স্ট্রাকচার** | ⭐⭐⭐⭐ | ফিচার-ভিত্তিক, পরিষ্কার |
+| **TypeScript ব্যবহার** | ⭐⭐⭐⭐ | বেশিরভাগ জায়গায় typed |
+| **RTK Query ব্যবহার** | ⭐⭐⭐⭐⭐ | সঠিকভাবে cache, tags, optimistic updates |
+| **Socket ম্যানেজমেন্ট** | ⭐⭐⭐⭐ | Singleton, room management, reconnection |
+| **Error Handling** | ⭐⭐⭐ | কিছু জায়গায় try-catch আছে |
+| **Code Comments** | ⭐⭐⭐⭐ | ভালো documentation comments |
+
+### ⚠️ **যে সমস্যাগুলো ঠিক করা উচিত:**
+
+**১. Commented-out কোড:**
+- `store.ts` - 70+ লাইন
+- `incompleteTestApi.ts` - 50+ লাইন
+- `NotificationItem.tsx`, `NotificationSheet.tsx` - অনেক commented-out
+- এগুলো delete করা উচিত
+
+**২. Duplicate Code:**
+- `answerQuestion` ও `getTestResult` দুই জায়গায়
+- `NotificationItem` ও `NotificationSheet` user/admin দুই version এ
+
+**৩. `any` type ব্যবহার:**
+- `NotificationSlice.ts` এ `as any`
+- `ChatContext.tsx` এ `catch (error: any)`
+
+**৪. Console.log Production এ:**
+- অনেক জায়গায় console.log আছে
+
+**৫. Socket transports:**
+- `transports: ['polling']` - WebSocket ব্যবহার করা উচিত
+
+**৬. Environment Variable Fallback:**
+- Socket URL এর জন্য আলাদা env variable থাকা উচিত
+
+**৭. `useMeQuery` বারবার call:**
+- `AuthProvider.tsx` এবং `MessageSection.tsx` দুই জায়গায় `useMeQuery` call হচ্ছে
+
+---
+
+## 📋 সামগ্রিক রেটিং
+
+| বিভাগ | রেটিং (১০ এ) |
+|-------|-------------|
+| **Redux/RTK Query ইমপ্লিমেন্টেশন** | **8/10** |
+| **Socket ইমপ্লিমেন্টেশন** | **7.5/10** |
+| **কোড স্ট্রাকচার** | **8/10** |
+| **মেইনটেইনেবিলিটি** | **7/10** |
+| **ক্লিন কোড** | **6.5/10** |
+
+### 🎯 **সারসংক্ষেপ:**
+
+আপনার কোডবেস **ভালোভাবে স্ট্রাকচারড** এবং **RTK Query সঠিকভাবে ব্যবহার** করা হয়েছে। Socket ইমপ্লিমেন্টেশনও **সম্পূর্ণ** - room management, reconnection, optimistic updates সব আছে। কিন্তু **ক্লিনলাইনেস** এর দিক থেকে কিছু কাজ বাকি আছে - commented-out কোড, duplicate endpoints, console.log, `any` type ইত্যাদি। এগুলো ঠিক করলে কোডবেস **production-ready** হবে।
+
+### 🔧 **সাজেস্টেড ইমপ্রুভমেন্ট:**
+
+1. Commented-out কোড সব delete করুন
+2. Duplicate endpoints merge করুন
+3. `any` type replace করুন proper types দিয়ে
+4. Console.log production এ remove করুন
+5. Socket এ `transports: ['websocket', 'polling']` ব্যবহার করুন
+6. Socket URL এর জন্য আলাদা env variable ব্যবহার করুন
+7. `useMeQuery` একবারই call করুন (context বা global state এ)

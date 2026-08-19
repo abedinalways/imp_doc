@@ -1,0 +1,111 @@
+ai chatbot by n8n
+
+## ফাইল Structure
+
+```javascript
+src/
+├── components/chatbot/
+│   └── Chatbot.tsx          # UI কমপোনেন্ট
+└── app/api/chatbot/
+    └── route.ts             # API endpoint
+```
+
+## 🔧 Dependencies
+
+- `lucide-react` - আইকনের জন্য (ইতিমধ্যে package.json-এ আছে)
+- React 19 + Next.js 16
+- Tailwind CSS v4
+
+## 📋 Integration Steps
+
+### ১. ফাইল কপি করুন
+
+- `src/components/chatbot/Chatbot.tsx` কপি করুন
+- `src/app/api/chatbot/route.ts` কপি করুন
+
+### ২. API Route Setup
+
+Next.js অ্যাপ রুটারে `/api/chatbot/route.ts` প্লেস করুন।
+
+### ৩. Environment Variable
+
+প্রজেক্টের `.env.local` ফাইলে যোগ করুন:
+
+```env
+N8N_CHATBOT_URL=https://your-n8n-instance.com/webhook/your-webhook-id
+```
+
+### ৪. CSS Additions
+
+আপনার global CSS ফাইলে এই অ্যানিমেশনগুলো যোগ করুন:
+
+- `@keyframes fade-in` + `.animate-fade-in` (চ্যাট উইন্ডো)
+- `@keyframes message-in` + `.animate-message-in` (মেসেজ এনিমেশন)
+- `@keyframes bounce` + `.typing-dot` (টাইপিং ইন্ডিকেটর)
+- `.custom-scroll` (স্যামলার স্ক্রলবার)
+
+### ৫. Component Use
+
+যেকোনো লেআউটে ইমপোর্ট করুন:
+
+```tsx
+import Chatbot from '@/components/chatbot/Chatbot';
+
+// লেআউটের শেষে প্লেস করুন
+<Chatbot />
+```
+
+## ⚙️ Customization Options
+
+### Color Theme বদলানো
+
+`Chatbot.tsx` ফাইলে `#01503b` কালার রিপ্লেস করুন:
+
+- লাইন 133, 143: ব্যাকগ্রাউন্ড কালার
+- লাইন 171-173: ইউজার মেসেজ কালার
+- লাইন 202, 213: বাটন কালার
+
+### Position変更
+
+```tsx
+// bottom-right (default)
+className="fixed bottom-6 right-6"
+
+// bottom-left
+className="fixed bottom-6 left-6"
+
+// top-right
+className="fixed top-6 right-6"
+```
+
+### Welcome Message Change
+
+লাইন 37-44 এর `content` প্রপার্টি এডিট করুন:
+
+```tsx
+content: 'Hello! I am your AI assistant. How can I help you?'
+```
+
+### Timeout Change
+
+`route.ts` লাইন 4:
+
+```tsx
+const N8N_TIMEOUT_MS = 30000; // 30 seconds
+```
+
+## 🔌 n8n Workflow Setup
+
+1. n8n-এ __Chat Trigger__ নোড যোগ করুন
+2. আপনার AI workflow লিংক করুন
+3. webhook URL কপি করে `N8N_CHATBOT_URL`-এ পেস্ট করুন
+
+## 📦 Standalone Package আকারে
+
+এই কমপোনেন্টগুলো একটি NestJS অ্যাপে ডিপ্লয় করতে চাইলে:
+
+- Client component: `Chatbot.tsx`
+- API proxy: `route.ts` (আপনার ব্যাকএন্ডের রুটে অ্যাডাজাস্ট করুন)
+
+__Maintained by:__ AMRounds Team\
+__Tech Stack:__ Next.js 16, React 19, Tailwind v4, lucide-react

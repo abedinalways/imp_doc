@@ -1,0 +1,6 @@
+ssh root@31.97.99.200
+TableRounds.1994
+cd /var/www/frontend/
+git pull origin main
+npm run build
+pm2 restart 1

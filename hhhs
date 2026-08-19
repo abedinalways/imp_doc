@@ -1,0 +1,37 @@
+ekhon ami chaitesi j oms page ta jeta ase oi page ta dynamic korte and admin panel theke sob kisu chnage kora jabe
+
+mane amar ei project ar client chaitese j aro specialty add korbe...and seta admin panel theke hobe . karon future a jodi aro specialty add korte chay tahole jeno se admin dashboard thekei sob maintain korte pare
+
+ekhane
+
+ki ki dynamic korte hobe boli
+
+page title- Mastering Every Aspect of {specialty_name}
+
+page image- <img src={Specialty_banner_img}/>
+
+subtitle -same static . not changabele
+
+button - button text-Explore {specialty_name} Features
+
+what we get-
+
+card -static - not changabele
+
+Specialty Level Content
+
+<img src={topic_img}/>/ {topic_name}
+
+{Specialty_img}
+
+Ready to Elevate Your {specialty_name} Training?
+
+join ourgrowing community of {specialty_name} trainees and surgeons dedicated to improving everyday practice
+
+static button + static button (no change needed)
+
+egula sob admin dashboard theke maintain kora jabe/
+
+eta korar jonno plan ta amake bolo...
+
+age plan bolo..then ami pore egula implement korbo.. agei code a implement korar dorkar nai...age plan ta kore doa
